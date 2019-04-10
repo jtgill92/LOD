@@ -1,0 +1,12 @@
+#myWebGLCanvas {
+    position: absolute;
+    left: 0px;
+    top: 0px;
+    z-index: 0;
+}
+#overlay {
+	position: absolute;
+	left: 10px;
+	top: 10px;
+	color: rgb(0,200,155);
+}
