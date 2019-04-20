@@ -1,10 +1,11 @@
 /* GLOBAL CONSTANTS AND VARIABLES */
 
 /* assignment specific globals */
-const INPUT_URL = "https://jtgill92.github.io/Culling/"; // "https://ncsucg4games.github.io/prog2/"; // location of input files
+const INPUT_URL = "https://jtgill92.github.io/LOD/"; // "https://ncsucg4games.github.io/prog2/"; // location of input files
 const INPUT_TRIANGLES_URL = INPUT_URL + "triangles.json"; // triangles file loc
 const INPUT_SPHERES_URL = INPUT_URL + "spheres.json"; // spheres file loc
 const INPUT_ROOMS_URL = INPUT_URL + "rooms.json"; // triangles file loc
+const INPUT_BUILDING_URL = INPUT_URL + "building.json"; // triangles file loc
 // var defaultEye = vec3.fromValues(0.5,0.5,-0.5); // default eye position in world space
 var defaultEye = vec3.fromValues(3.5, 0.5, 3.5);
 // var defaultCenter = vec3.fromValues(0.5,0.5,0.5); // default view direction in world space
@@ -527,6 +528,131 @@ function loadModels() {
                 gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleBuffers[triangleBuffers.length-1]); // activate that buffer
                 gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(oneSphere.triangles),gl.STATIC_DRAW); // data in
             } // end if sphere file loaded
+        } // end if triangle file loaded
+    } // end try 
+    
+    catch(e) {
+        console.log(e);
+    } // end catch
+} // end load models
+
+
+var inputTriangles2 = [];
+// read models in, load them into webgl buffers
+function loadModels2() {
+    
+    // load a texture for the current set or sphere
+    function loadTexture(whichModel,currModel,textureFile) {
+        
+        // load a 1x1 gray image into texture for use when no texture, and until texture loads
+        textures[whichModel] = gl.createTexture(); // new texture struct for model
+        var currTexture = textures[whichModel]; // shorthand
+        gl.bindTexture(gl.TEXTURE_2D, currTexture); // activate model's texture
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true); // invert vertical texcoord v, load gray 1x1
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,new Uint8Array([64, 64, 64, 255]));        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true); // invert vertical texcoord v
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR); // use linear filter for magnification
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); // use mipmap for minification
+        gl.generateMipmap(gl.TEXTURE_2D); // construct mipmap pyramid
+        gl.bindTexture(gl.TEXTURE_2D, null); // deactivate model's texture
+        
+        // if there is a texture to load, asynchronously load it
+        if (textureFile != false) {
+            currTexture.image = new Image(); // new image struct for texture
+            currTexture.image.onload = function () { // when texture image loaded...
+                gl.bindTexture(gl.TEXTURE_2D, currTexture); // activate model's new texture
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, currTexture.image); // norm 2D texture
+                gl.generateMipmap(gl.TEXTURE_2D); // rebuild mipmap pyramid
+                gl.bindTexture(gl.TEXTURE_2D, null); // deactivate model's new texture
+            } // end when texture image loaded
+            currTexture.image.onerror = function () { // when texture image load fails...
+                console.log("Unable to load texture " + textureFile); 
+            } // end when texture image load fails
+            currTexture.image.crossOrigin = "Anonymous"; // allow cross origin load, please
+            currTexture.image.src = INPUT_URL + textureFile; // set image location
+        } // end if material has a texture
+    } // end load texture
+    
+    inputTriangles = getJSONFile(INPUT_BUILDING_URL,"building"); // read in the triangle data
+    var otherTriangles = getJSONFile(INPUT_TRIANGLES_URL,"triangles"); // read in the triangle data
+
+    try {
+        if (inputTriangles == String.null)
+            throw "Unable to load triangles file!";
+        else {
+            var currSet; // the current triangle set
+            var whichSetVert; // index of vertex in current triangle set
+            var whichSetTri; // index of triangle in current triangle set
+            var vtxToAdd; // vtx coords to add to the vertices array
+            var normToAdd; // vtx normal to add to the normal array
+            var uvToAdd; // uv coords to add to the uv arry
+            var triToAdd; // tri indices to add to the index array
+            var maxCorner = vec3.fromValues(Number.MIN_VALUE,Number.MIN_VALUE,Number.MIN_VALUE); // bbox corner
+            var minCorner = vec3.fromValues(Number.MAX_VALUE,Number.MAX_VALUE,Number.MAX_VALUE); // other corner
+
+            var meshes = inputTriangles.meshes;
+        
+            // process each triangle set to load webgl vertex and triangle buffers
+            numTriangleSets = inputTriangles.meshes.length; // remember how many tri sets
+            for (var whichSet=0; whichSet<meshes.length; whichSet++) { // for each tri set
+                currSet = meshes[whichSet];
+                
+                // set up hilighting, modeling translation and rotation
+                currSet.center = vec3.fromValues(0,0,0);  // center point of tri set
+                currSet.on = false; // not highlighted
+                currSet.translation = vec3.fromValues(0,0,0); // no translation
+                currSet.xAxis = vec3.fromValues(1,0,0); // model X axis
+                currSet.yAxis = vec3.fromValues(0,1,0); // model Y axis 
+
+                // set up the vertex, normal and uv arrays, define model center and axes
+                currSet.glVertices = []; // flat coord list for webgl
+                currSet.glNormals = []; // flat normal list for webgl
+                currSet.glUvs = []; // flat texture coord list for webgl
+                var numVerts = currSet.vertices.length; // num vertices in tri set
+                for (whichSetVert=0; whichSetVert<numVerts; whichSetVert++) { // verts in set
+                    vtxToAdd = currSet.vertices[whichSetVert]; // get vertex to add
+                    normToAdd = currSet.normals[whichSetVert]; // get normal to add
+                    uvToAdd1 = currSet.texturecoords[0][whichSetVert]; // get uv to add
+                    uvToAdd2 = currSet.texturecoords[0][whichSetVert+1];
+                    currSet.glVertices.push(vtxToAdd/*[0],vtxToAdd[1],vtxToAdd[2]*/); // put coords in set vertex list
+                    currSet.glNormals.push(normToAdd/*[0],normToAdd[1],normToAdd[2]*/); // put normal in set normal list
+                    currSet.glUvs.push(uvToAdd1, uvToAdd2/*[0],uvToAdd[1]*/); // put uv in set uv list
+                    //vec3.max(maxCorner,maxCorner,vtxToAdd); // update world bounding box corner maxima
+                    //vec3.min(minCorner,minCorner,vtxToAdd); // update world bounding box corner minima
+                    //vec3.add(currSet.center,currSet.center,vtxToAdd); // add to ctr sum
+                } // end for vertices in set
+                //vec3.scale(currSet.center,currSet.center,1/numVerts); // avg ctr sum
+
+                viewDelta = .1;//vec3.length(vec3.subtract(temp,maxCorner,minCorner)) / 100; // set global
+
+                // send the vertex coords, normals and uvs to webGL; load texture
+                vertexBuffers[whichSet] = gl.createBuffer(); // init empty webgl set vertex coord buffer
+                gl.bindBuffer(gl.ARRAY_BUFFER,vertexBuffers[whichSet]); // activate that buffer
+                gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(currSet.glVertices),gl.STATIC_DRAW); // data in
+                normalBuffers[whichSet] = gl.createBuffer(); // init empty webgl set normal component buffer
+                gl.bindBuffer(gl.ARRAY_BUFFER,normalBuffers[whichSet]); // activate that buffer
+                gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(currSet.glNormals),gl.STATIC_DRAW); // data in
+                uvBuffers[whichSet] = gl.createBuffer(); // init empty webgl set uv coord buffer
+                gl.bindBuffer(gl.ARRAY_BUFFER,uvBuffers[whichSet]); // activate that buffer
+                gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(currSet.glUvs),gl.STATIC_DRAW); // data in
+
+                currSet.material = otherTriangles[2].material;
+
+                loadTexture(whichSet,currSet,currSet.material.texture); // load tri set's texture
+
+                // set up the triangle index array, adjusting indices across sets
+                currSet.glTriangles = []; // flat index list for webgl
+                triSetSizes[whichSet] = currSet.faces.length; // number of tris in this set
+                for (whichSetTri=0; whichSetTri<triSetSizes[whichSet]; whichSetTri++) {
+                    triToAdd = currSet.faces[whichSetTri]; // get tri to add
+                    currSet.glTriangles.push(triToAdd[0],triToAdd[1],triToAdd[2]); // put indices in set list
+                } // end for triangles in set
+
+                // send the triangle indices to webGL
+                triangleBuffers.push(gl.createBuffer()); // init empty triangle index buffer
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleBuffers[whichSet]); // activate that buffer
+                gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(currSet.glTriangles),gl.STATIC_DRAW); // data in
+
+            } // end for each triangle set 
         } // end if triangle file loaded
     } // end try 
     
@@ -1568,7 +1694,7 @@ function renderModels() {
     gl.uniform3fv(eyePositionULoc,Eye); // update eye position
 
     /* perform desired culling */
-    var tris;
+    /*var tris;
     if (cullMode == 1) {
         tris = triRenderables;
     } else if (cullMode == 2) {
@@ -1618,7 +1744,7 @@ function renderModels() {
     } // end for each triangle set
 
     /* Update GUI */
-    trisNode.nodeValue = tris.length;
+    /*trisNode.nodeValue = tris.length;*/
 
     elapsedTime = (new Date).getTime() - initialTime;
     initialTime = (new Date).getTime();
@@ -1639,7 +1765,7 @@ function renderModels() {
     // render each triangle set
     var currSet, setMaterial; // the tri set and its material properties
     for (var whichTriSet=0; whichTriSet<numTriangleSets; whichTriSet++) {
-        currSet = inputTriangles[whichTriSet];
+        currSet = inputTriangles.meshes[whichTriSet];
         
         // make model transform, add to view project
         makeModelTransform(currSet);
@@ -1648,7 +1774,7 @@ function renderModels() {
         gl.uniformMatrix4fv(pvmMatrixULoc, false, hpvmMatrix); // pass in the hpvm matrix
         
         // reflectivity: feed to the fragment shader
-        if (inputTriangles[whichTriSet].on)
+        if (inputTriangles.meshes[whichTriSet].on)
             setMaterial = HIGHLIGHTMATERIAL; // highlight material
         else
             setMaterial = currSet.material; // normal material
@@ -1676,7 +1802,7 @@ function renderModels() {
     } // end for each triangle set
     
     // render each sphere
-    var sphere, currentMaterial, instanceTransform = mat4.create(); // the current sphere and material
+    /*var sphere, currentMaterial, instanceTransform = mat4.create(); // the current sphere and material
     gl.bindBuffer(gl.ARRAY_BUFFER,vertexBuffers[vertexBuffers.length-1]); // activate vertex buffer
     gl.vertexAttribPointer(vPosAttribLoc,3,gl.FLOAT,false,0,0); // feed vertex buffer to shader
     gl.bindBuffer(gl.ARRAY_BUFFER,normalBuffers[normalBuffers.length-1]); // activate normal buffer
@@ -1713,7 +1839,7 @@ function renderModels() {
 
         // draw a transformed instance of the sphere
         gl.drawElements(gl.TRIANGLES,triSetSizes[triSetSizes.length-1],gl.UNSIGNED_SHORT,0); // render
-    } // end for each sphere
+    }*/ // end for each sphere
 } // end render model
 
 
@@ -1722,9 +1848,10 @@ function renderModels() {
 function main() {
   
   setupWebGL(); // set up the webGL environment
-  loadModels(); // load in the models from tri file
+  //loadModels(); // load in the models from tri file
+  loadModels2();
   setupShaders(); // setup the webGL shaders
-  loadRooms(); // load in the rooms from rooms file
+  //loadRooms(); // load in the rooms from rooms file
   renderModels(); // draw the triangles using webGL
   
 } // end main
