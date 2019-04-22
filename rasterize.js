@@ -50,7 +50,8 @@ var specularULoc; // where to put specular reflecivity for fragment shader
 var shininessULoc; // where to put specular exponent for fragment shader
 var usingTextureULoc; // where to put using texture boolean for fragment shader
 var textureULoc; // where to put texture for fragment shader
-var eyePositionULo; // where to put eye postion for pixel shader
+var eyePositionULoc; // where to put eye postion for pixel shader
+var depthModeULoc; // where to put depth mode boolean for fragment shader
 
 /* interaction variables */
 var Eye = vec3.clone(defaultEye); // eye position in world space
@@ -70,8 +71,9 @@ var elapsedTime;
 var previousTimes = [];
 var avgTime;
 
-/* culling variables */
-var cullMode = 1;
+/* LOD variables */
+var LODMode = 1;
+var DepthMode = false;
 
 // ASSIGNMENT HELPER FUNCTIONS
 
@@ -145,15 +147,18 @@ function handleKeyDown(event) {
 
     switch (event.code) {
 
-        // culling
+        // LOD
         case "Digit1": // no culling
-            cullMode = 1;
+            LODMode = 1;
             break;
         case "Digit2": // frustum culling
-            cullMode = 2;
+            LODMode = 2;
             break;
         case "Digit3": // portal culling
-            cullMode = 3;
+            LODMode = 3;
+            break;
+        case "Digit0": // portal culling
+            DepthMode = !DepthMode;
             break;
         
         // model selection
@@ -1077,6 +1082,9 @@ function setupShaders() {
         // geometry properties
         varying vec3 vWorldPos; // world xyz of fragment
         varying vec3 vVertexNormal; // normal of fragment
+
+        // depthMode
+        uniform bool uDepthMode;
         
         void main(void) {
         
@@ -1117,7 +1125,16 @@ function setupShaders() {
             // combine to find lit color
             vec3 litColor = ambient + (diffuse1 + specular1)/denom1 + (diffuse2 + specular2)/denom2; 
             
-            if (!uUsingTexture) {
+            if (uDepthMode) { // render depth map
+                // linearize
+                float f = 1000.0; //far plane
+                float n = 0.1; //near plane
+                float z = (2.0 * n) / (f + n - gl_FragCoord.z * (f - n));
+
+                //gl_FragColor = vec4(10.0*z,10.0*z,10.0*z,1.0); //for demo
+                gl_FragColor = vec4(z,z,z,1.0);
+            }
+            else if (!uUsingTexture) {
                 gl_FragColor = vec4(litColor, 1.0);
             } else {
                 vec4 texColor = texture2D(uTexture, vec2(vVertexUV.s, vVertexUV.t));
@@ -1180,6 +1197,7 @@ function setupShaders() {
                 shininessULoc = gl.getUniformLocation(shaderProgram, "uShininess"); // ptr to shininess
                 usingTextureULoc = gl.getUniformLocation(shaderProgram, "uUsingTexture"); // ptr to using texture
                 textureULoc = gl.getUniformLocation(shaderProgram, "uTexture"); // ptr to texture
+                depthModeULoc = gl.getUniformLocation(shaderProgram, "uDepthMode"); // ptr to depth mode
                 
                 // pass global (not per model) constants into fragment uniforms
                 // gl.uniform3fv(eyePositionULoc,Eye); // pass in the eye's position // causes static eye pos calculations
@@ -1761,6 +1779,8 @@ function renderModels() {
     timeNode.nodeValue = avgTime.toFixed(2);
 
     /* END Update GUI */
+
+    gl.uniform1i(depthModeULoc,DepthMode);
 
     // render each triangle set
     var currSet, setMaterial; // the tri set and its material properties
