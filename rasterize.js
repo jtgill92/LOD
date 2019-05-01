@@ -53,6 +53,7 @@ var textureULoc; // where to put texture for fragment shader
 var eyePositionULoc; // where to put eye postion for pixel shader
 var depthModeULoc; // where to put depth mode boolean for fragment shader
 var orthoULoc; // where to put ortho projection boolean for fragment shader
+var funModeULoc; // where to put fun mode boolean for fragment shader
 
 /* interaction variables */
 var Eye = vec3.clone(defaultEye); // eye position in world space
@@ -74,6 +75,7 @@ var avgTime;
 
 /* LOD variables */
 var LODMode = 1;
+var prevLOD = 1;
 var auto = false;
 var switchMode = 1;
 var depthMode = false;
@@ -84,6 +86,7 @@ var tris;
 var texture = null;
 var renderbuffer = null;
 var framebuffer = null;
+var funMode = false;
 
 // ASSIGNMENT HELPER FUNCTIONS
 
@@ -169,6 +172,11 @@ function handleKeyDown(event) {
             break;
         case "Digit0": // use depth buffer
             depthMode = !depthMode;
+            if (funMode) {funMode = false;}
+            break;
+        case "Digit9": // use depth buffer
+            funMode = !funMode;
+            if (depthMode) {depthMode = false;}
             break;
         case "KeyB": // use depth buffer
             if (switchMode == 1) {switchMode = 2;}
@@ -539,6 +547,7 @@ function setupShaders() {
 
         // depthMode
         uniform bool uDepthMode;
+        uniform bool uFunMode;
         uniform bool uOrtho;
         uniform float uSize;
         uniform float uRes;
@@ -581,8 +590,29 @@ function setupShaders() {
             
             // combine to find lit color
             vec3 litColor = ambient + (diffuse1 + specular1)/denom1 + (diffuse2 + specular2)/denom2; 
-            
-            if (uDepthMode) { // render depth map
+            if (uFunMode) { // render good times
+                // linearize
+                float f = 100.0; //far plane
+                float n = 0.1; //near plane
+                float z = 0.0;
+
+                z = (2.0 * n) / (f + n - gl_FragCoord.z * (f - n)); 
+
+                // convert to 0..(res-1) aka "discretize"
+                float res = uRes; //256.0;
+                float d = uSize; //25.0;
+
+                float d2 = (d-n)/(f-n);
+
+                //z = ((res - 1.0)/d2)*z;
+                //z = round(z); // doesn't work; not supported at this time?
+                //z = floor(z + 0.5);
+
+                z = z*100.0; //fun (goes well with //neat)
+
+                gl_FragColor = vec4(sin(z*2.0*3.14),cos(z*2.0*3.14),z,1.0); //neat
+            }
+            else if (uDepthMode) { // render depth map
                 // linearize
                 float f = 100.0; //far plane
                 float n = 0.1; //near plane
@@ -677,6 +707,7 @@ function setupShaders() {
                 textureULoc = gl.getUniformLocation(shaderProgram, "uTexture"); // ptr to texture
                 depthModeULoc = gl.getUniformLocation(shaderProgram, "uDepthMode"); // ptr to depth mode
                 orthoULoc = gl.getUniformLocation(shaderProgram, "uOrtho"); // ptr to ortho mode
+                funModeULoc = gl.getUniformLocation(shaderProgram, "uFunMode"); // ptr to depth mode
                 
                 // pass global (not per model) constants into fragment uniforms
                 // gl.uniform3fv(eyePositionULoc,Eye); // pass in the eye's position // causes static eye pos calculations
@@ -1271,11 +1302,16 @@ function switching() {
         var A = Math.PI*p*p*512*512;
         //console.log(A);
 
-        if (A < 40*40) {
+        var EPSILON1 = .05*40*40;
+        var EPSILON2 = .05*80*80;
+
+        if (A < 40*40 - EPSILON1 && LODMode == 2) {
             LODMode = 3;
-        } else if (A < 80*80) {
+        } else if (A > 40*40 + EPSILON1 && LODMode == 3) {
             LODMode = 2;
-        } else {
+        }else if (A < 80*80 - EPSILON2 && LODMode == 1) {
+            LODMode = 2;
+        } else if (A > 80*80 + EPSILON2 && LODMode == 2){
             LODMode = 1;
         }
     }
@@ -1328,6 +1364,7 @@ function renderModels() {
     var lod = LODMode - 1;
 
     gl.uniform1i(depthModeULoc,depthMode);
+    gl.uniform1i(funModeULoc,funMode);
     gl.uniform1i(orthoULoc,false);
 
     if (auto) {
